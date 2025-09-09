@@ -82,7 +82,7 @@ export async function POST(req) {
       } catch {
         // If not found, create it
         await qdrantClient.createCollection(collectionName, {
-          vectors: { size: 768, distance: "Cosine" },
+          vectors: { size: 1536, distance: "Cosine" },
         });
       }
 

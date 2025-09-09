@@ -65,7 +65,7 @@ export async function POST(req) {
       await qdrantClient.getCollection(collectionName);
     } catch {
       await qdrantClient.createCollection(collectionName, {
-        vectors: { size: 768, distance: "Cosine" },
+        vectors: { size: 1536, distance: "Cosine" },
       });
     }
 

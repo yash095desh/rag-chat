@@ -58,7 +58,7 @@ export async function POST(req) {
     } catch {
       // If not found, create it (make sure vector size matches your embeddings)
       await qdrantClient.createCollection(collectionName, {
-        vectors: { size: 768, distance: "Cosine" },
+        vectors: { size: 1536, distance: "Cosine" },
       });
     }
 
