@@ -5,7 +5,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { LRUCache } from "lru-cache";
 
 // Rate limiting setup
-const windowMs = 60 * 60 * 1000; // 15 minutes
+const windowMs = 24 * 60 * 60 * 1000; // 1 day
 const maxRequests = 20;
 
 const rateLimitCache = new LRUCache({
