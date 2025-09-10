@@ -6,6 +6,7 @@ import { v4 as uuid } from "uuid";
 import { embeddings, qdrantClient } from "@/lib/langchain";
 import fs from "fs";
 import path from "path";
+import os from "os"; // Import os to get tmp directory
 
 export async function POST(req) {
   try {
@@ -24,8 +25,12 @@ export async function POST(req) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const tmpDir = path.join("C:", "tmp");
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+    // Use the system's tmp directory
+    const tmpDir = path.join(os.tmpdir(), "uploads");
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+
     const filePath = path.join(tmpDir, file.name);
     fs.writeFileSync(filePath, buffer);
 
@@ -52,34 +57,35 @@ export async function POST(req) {
 
     const collectionName = `${userId}_collection`;
 
-    //  Ensure collection exists
+    // Ensure collection exists
     try {
       await qdrantClient.getCollection(collectionName);
     } catch {
-      // If not found, create it (make sure vector size matches your embeddings)
       await qdrantClient.createCollection(collectionName, {
         vectors: { size: 1536, distance: "Cosine" },
       });
     }
 
-    //  Create index for metadata.docId (needed for filtering/deleting later)
+    // Create index for metadata.docId
     try {
       await qdrantClient.createPayloadIndex(collectionName, {
         field_name: "docId",
-        field_schema: "keyword", // or "uuid" if you prefer strict UUID type
+        field_schema: "keyword",
       });
     } catch (err) {
       if (err?.response?.status !== 409) {
-        // 409 = index already exists
         console.error("Failed to create index:", err);
       }
     }
 
-    //  Insert chunks into Qdrant
+    // Insert chunks into Qdrant
     await QdrantVectorStore.fromDocuments(chunks, embeddings, {
       client: qdrantClient,
       collectionName,
     });
+
+    // Cleanup the uploaded file
+    fs.unlinkSync(filePath);
 
     return NextResponse.json({
       message: "PDF uploaded successfully!",

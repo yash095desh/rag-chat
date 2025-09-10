@@ -6,6 +6,7 @@ import { embeddings, qdrantClient } from "@/lib/langchain";
 import { OpenAI } from "openai";
 import fs from "fs";
 import path from "path";
+import os from "os"; // Import os for tmp directory
 
 export async function POST(req) {
   try {
@@ -32,9 +33,11 @@ export async function POST(req) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Save file temporarily
-    const tmpDir = path.join(process.cwd(), "tmp");
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    // Use system temp directory
+    const tmpDir = path.join(os.tmpdir(), "uploads");
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
     const filePath = path.join(tmpDir, `${Date.now()}-${file.name}`);
     fs.writeFileSync(filePath, buffer);
 
@@ -45,14 +48,12 @@ export async function POST(req) {
       const extractedText = await extractTextFromImageOpenAI(buffer);
 
       if (!extractedText.trim()) {
-        // Clean up temporary file
         fs.unlinkSync(filePath);
         return NextResponse.json({ 
           error: "No text could be extracted from the image" 
         }, { status: 400 });
       }
 
-      // Create document with extracted text
       const docsWithMeta = [{
         pageContent: extractedText,
         metadata: {
@@ -67,7 +68,6 @@ export async function POST(req) {
         },
       }];
 
-      // Split text into chunks
       const splitter = new RecursiveCharacterTextSplitter({
         chunkSize: 1000,
         chunkOverlap: 200,
@@ -76,17 +76,14 @@ export async function POST(req) {
 
       const collectionName = `${userId}_collection`;
 
-      // Ensure collection exists
       try {
         await qdrantClient.getCollection(collectionName);
       } catch {
-        // If not found, create it
         await qdrantClient.createCollection(collectionName, {
           vectors: { size: 1536, distance: "Cosine" },
         });
       }
 
-      // Create index for metadata.docId
       try {
         await qdrantClient.createPayloadIndex(collectionName, {
           field_name: "docId",
@@ -98,7 +95,6 @@ export async function POST(req) {
         }
       }
 
-      // Insert chunks into Qdrant
       await QdrantVectorStore.fromDocuments(chunks, embeddings, {
         client: qdrantClient,
         collectionName,
@@ -112,7 +108,7 @@ export async function POST(req) {
       });
 
     } finally {
-      // Clean up temporary file (always execute)
+      // Clean up temporary file always
       try {
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
@@ -128,7 +124,6 @@ export async function POST(req) {
   }
 }
 
-// Extract text using OpenAI GPT-4 Vision (optimized for invoice processing)
 async function extractTextFromImageOpenAI(buffer) {
   try {
     const openai = new OpenAI({
@@ -136,7 +131,7 @@ async function extractTextFromImageOpenAI(buffer) {
     });
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", // Updated to use the latest model
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
@@ -158,7 +153,7 @@ Format the extracted text in a clear, structured way that preserves the document
             {
               type: "image_url",
               image_url: {
-                url: `data:image/jpeg;base64,${buffer.toString('base64')}`
+                url: `data:${buffer.type};base64,${buffer.toString('base64')}`
               }
             }
           ],
@@ -170,8 +165,7 @@ Format the extracted text in a clear, structured way that preserves the document
     return response.choices[0].message.content || "";
   } catch (error) {
     console.error("OpenAI Vision Error:", error);
-    
-    // More specific error handling
+
     if (error.code === 'insufficient_quota') {
       throw new Error("OpenAI API quota exceeded. Please check your billing.");
     } else if (error.code === 'invalid_api_key') {
