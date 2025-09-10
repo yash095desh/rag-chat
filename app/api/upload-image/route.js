@@ -4,9 +4,6 @@ import { QdrantVectorStore } from "@langchain/qdrant";
 import { v4 as uuid } from "uuid";
 import { embeddings, qdrantClient } from "@/lib/langchain";
 import { OpenAI } from "openai";
-import fs from "fs";
-import path from "path";
-import os from "os"; // Import os for tmp directory
 
 export async function POST(req) {
   try {
@@ -30,25 +27,18 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
+    // Convert file to buffer - no filesystem operations needed
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-
-    // Use system temp directory
-    const tmpDir = path.join(os.tmpdir(), "uploads");
-    if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true });
-    }
-    const filePath = path.join(tmpDir, `${Date.now()}-${file.name}`);
-    fs.writeFileSync(filePath, buffer);
 
     const docId = uuid();
 
     try {
       // Extract text from image using GPT-4 Vision
-      const extractedText = await extractTextFromImageOpenAI(buffer);
+      // Pass the buffer directly along with the MIME type
+      const extractedText = await extractTextFromImageOpenAI(buffer, file.type);
 
       if (!extractedText.trim()) {
-        fs.unlinkSync(filePath);
         return NextResponse.json({ 
           error: "No text could be extracted from the image" 
         }, { status: 400 });
@@ -107,15 +97,11 @@ export async function POST(req) {
         chunksCreated: chunks.length,
       });
 
-    } finally {
-      // Clean up temporary file always
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      } catch (cleanupError) {
-        console.error("Failed to clean up temporary file:", cleanupError);
-      }
+    } catch (error) {
+      console.error("Processing error:", error);
+      return NextResponse.json({ 
+        error: error.message || "Failed to process image" 
+      }, { status: 500 });
     }
 
   } catch (err) {
@@ -124,7 +110,7 @@ export async function POST(req) {
   }
 }
 
-async function extractTextFromImageOpenAI(buffer) {
+async function extractTextFromImageOpenAI(buffer, mimeType) {
   try {
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -153,7 +139,7 @@ Format the extracted text in a clear, structured way that preserves the document
             {
               type: "image_url",
               image_url: {
-                url: `data:${buffer.type};base64,${buffer.toString('base64')}`
+                url: `data:${mimeType};base64,${buffer.toString('base64')}`
               }
             }
           ],
